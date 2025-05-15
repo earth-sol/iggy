@@ -263,7 +263,7 @@ async fn create_producers(
             let mut producer = client
                 .producer(stream, topic)?
                 .batch_length(batch_length)
-                .send_interval(IggyDuration::from_str(interval).expect("Invalid duration"))
+                .linger_time(IggyDuration::from_str(interval).expect("Invalid duration"))
                 .partitioning(Partitioning::balanced())
                 .create_topic_if_not_exists(
                     partitions_count,

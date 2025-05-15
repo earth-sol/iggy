@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<(), Box<dyn Error>> {
     let mut producer = client
         .producer(&args.stream_id, &args.topic_id)?
         .batch_length(args.messages_per_batch)
-        .send_interval(IggyDuration::from_str(&args.interval)?)
+        .linger_time(IggyDuration::from_str(&args.interval)?)
         .partitioning(Partitioning::balanced())
         .create_topic_if_not_exists(
             3,

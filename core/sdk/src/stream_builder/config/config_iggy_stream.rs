@@ -52,7 +52,7 @@ impl IggyStreamConfig {
     /// * `stream` - The stream name.
     /// * `topic` - The topic name.
     /// * `batch_length` - The max number of messages to send in a batch.
-    /// * `send_interval` - The interval between messages sent.
+    /// * `linger_time` - The interval between messages sent.
     /// * `polling_interval` - The interval between polling for new messages.
     ///
     /// Returns:
@@ -62,14 +62,14 @@ impl IggyStreamConfig {
         stream: &str,
         topic: &str,
         batch_length: u32,
-        send_interval: IggyDuration,
+        linger_time: IggyDuration,
         polling_interval: IggyDuration,
     ) -> Result<Self, IggyError> {
         let consumer_config =
             IggyConsumerConfig::from_stream_topic(stream, topic, batch_length, polling_interval)?;
 
         let producer_config =
-            IggyProducerConfig::from_stream_topic(stream, topic, batch_length, send_interval)?;
+            IggyProducerConfig::from_stream_topic(stream, topic, batch_length, linger_time)?;
 
         Ok(Self {
             consumer_config,
@@ -136,7 +136,7 @@ mod tests {
             IggyDuration::from_str("5ms").unwrap()
         );
         assert_eq!(
-            config.producer_config().send_interval(),
+            config.producer_config().linger_time(),
             IggyDuration::from_str("5ms").unwrap()
         );
     }
@@ -153,7 +153,7 @@ mod tests {
             IggyDuration::from_str("5ms").unwrap()
         );
         assert_eq!(
-            config.producer_config().send_interval(),
+            config.producer_config().linger_time(),
             IggyDuration::from_str("5ms").unwrap()
         );
     }
@@ -180,7 +180,7 @@ mod tests {
             IggyDuration::from_str("5ms").unwrap()
         );
         assert_eq!(
-            config.producer_config().send_interval(),
+            config.producer_config().linger_time(),
             IggyDuration::from_str("5ms").unwrap()
         );
     }

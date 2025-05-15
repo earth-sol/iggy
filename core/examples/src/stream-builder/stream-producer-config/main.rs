@@ -46,7 +46,7 @@ async fn main() -> Result<(), IggyError> {
         // Note, this only applies to batch send messages. Single messages are sent immediately.
         .batch_length(100)
         // Sets the interval between sending the messages. Affects latency so you want to benchmark this value.
-        .send_interval(IggyDuration::from_str("5ms").unwrap())
+        .linger_time(IggyDuration::from_str("5ms").unwrap())
         // `Partitioning` is used to specify to which partition the messages should be sent.
         // It has the following kinds:
         // - `Balanced` - the partition ID is calculated by the server using the round-robin algorithm.

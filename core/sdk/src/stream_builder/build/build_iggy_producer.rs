@@ -48,7 +48,7 @@ pub(crate) async fn build_iggy_producer(
     let topic_partitions_count = config.topic_partitions_count();
     let topic_replication_factor = config.topic_replication_factor();
     let batch_length = config.batch_length();
-    let send_interval = config.send_interval();
+    let linger_time = config.linger_time();
     let partitioning = config.partitioning().to_owned();
     let send_retries = config.send_retries_count();
     let send_retries_interval = config.send_retries_interval();
@@ -57,7 +57,7 @@ pub(crate) async fn build_iggy_producer(
     let mut builder = client
         .producer(stream, topic)?
         .batch_length(batch_length)
-        .send_interval(send_interval)
+        .linger_time(linger_time)
         .partitioning(partitioning)
         .create_stream_if_not_exists()
         .send_retries(send_retries, send_retries_interval)

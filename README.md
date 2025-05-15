@@ -249,7 +249,7 @@ let client = IggyClient::from_connection_string("iggy://user:secret@localhost:80
 let mut producer = client
     .producer("dev01", "events")?
     .batch_length(1000)
-    .send_interval(IggyDuration::from_str("1ms")?)
+    .linger_time(IggyDuration::from_str("1ms")?)
     .partitioning(Partitioning::balanced())
     .build();
 

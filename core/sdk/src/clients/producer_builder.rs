@@ -35,7 +35,7 @@ pub struct IggyProducerBuilder {
     partitioning: Option<Partitioning>,
     encryptor: Option<Arc<EncryptorKind>>,
     partitioner: Option<Arc<dyn Partitioner>>,
-    send_interval: Option<IggyDuration>,
+    linger_time: Option<IggyDuration>,
     create_stream_if_not_exists: bool,
     create_topic_if_not_exists: bool,
     topic_partitions_count: u32,
@@ -67,7 +67,7 @@ impl IggyProducerBuilder {
             partitioning: None,
             encryptor,
             partitioner,
-            send_interval: Some(IggyDuration::from(1000)),
+            linger_time: Some(IggyDuration::from(1000)),
             create_stream_if_not_exists: true,
             create_topic_if_not_exists: true,
             topic_partitions_count: 1,
@@ -110,17 +110,17 @@ impl IggyProducerBuilder {
     }
 
     /// Sets the interval between sending the messages, can be combined with `batch_length`.
-    pub fn send_interval(self, interval: IggyDuration) -> Self {
+    pub fn linger_time(self, interval: IggyDuration) -> Self {
         Self {
-            send_interval: Some(interval),
+            linger_time: Some(interval),
             ..self
         }
     }
 
     /// Clears the interval.
-    pub fn without_send_interval(self) -> Self {
+    pub fn without_linger_time(self) -> Self {
         Self {
-            send_interval: None,
+            linger_time: None,
             ..self
         }
     }
@@ -240,7 +240,7 @@ impl IggyProducerBuilder {
             self.partitioning,
             self.encryptor,
             self.partitioner,
-            self.send_interval,
+            self.linger_time,
             self.create_stream_if_not_exists,
             self.create_topic_if_not_exists,
             self.topic_partitions_count,

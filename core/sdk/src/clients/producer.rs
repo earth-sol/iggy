@@ -46,7 +46,7 @@ pub struct IggyProducer {
     partitioning: Option<Arc<Partitioning>>,
     encryptor: Option<Arc<EncryptorKind>>,
     partitioner: Option<Arc<dyn Partitioner>>,
-    send_interval_micros: u64,
+    linger_time_micros: u64,
     create_stream_if_not_exists: bool,
     create_topic_if_not_exists: bool,
     topic_partitions_count: u32,
@@ -94,7 +94,7 @@ impl IggyProducer {
             partitioning: partitioning.map(Arc::new),
             encryptor,
             partitioner,
-            send_interval_micros: interval.map_or(0, |i| i.as_micros()),
+            linger_time_micros: interval.map_or(0, |i| i.as_micros()),
             create_stream_if_not_exists,
             create_topic_if_not_exists,
             topic_partitions_count,
@@ -307,9 +307,9 @@ impl IggyProducer {
         let mut current_batch = 1;
         let batches_count = batches.len();
         for batch in batches {
-            if self.send_interval_micros > 0 {
+            if self.linger_time_micros > 0 {
                 Self::wait_before_sending(
-                    self.send_interval_micros,
+                    self.linger_time_micros,
                     self.last_sent_at.load(ORDERING),
                 )
                 .await;
