@@ -42,7 +42,7 @@ pub struct IggyProducer {
     stream_name: String,
     topic_id: Arc<Identifier>,
     topic_name: String,
-    batch_size: Option<usize>,
+    batch_length: Option<usize>,
     partitioning: Option<Arc<Partitioning>>,
     encryptor: Option<Arc<EncryptorKind>>,
     partitioner: Option<Arc<dyn Partitioner>>,
@@ -68,7 +68,7 @@ impl IggyProducer {
         stream_name: String,
         topic: Identifier,
         topic_name: String,
-        batch_size: Option<usize>,
+        batch_length: Option<usize>,
         partitioning: Option<Partitioning>,
         encryptor: Option<Arc<EncryptorKind>>,
         partitioner: Option<Arc<dyn Partitioner>>,
@@ -90,7 +90,7 @@ impl IggyProducer {
             stream_name,
             topic_id: Arc::new(topic),
             topic_name,
-            batch_size,
+            batch_length,
             partitioning: partitioning.map(Arc::new),
             encryptor,
             partitioner,
@@ -302,8 +302,8 @@ impl IggyProducer {
     ) -> Result<(), IggyError> {
         self.encrypt_messages(&mut messages)?;
         let partitioning = self.get_partitioning(&stream, &topic, &messages, partitioning)?;
-        let batch_size = self.batch_size.unwrap_or(MAX_BATCH_SIZE);
-        let batches = messages.chunks_mut(batch_size);
+        let batch_length = self.batch_length.unwrap_or(MAX_BATCH_SIZE);
+        let batches = messages.chunks_mut(batch_length);
         let mut current_batch = 1;
         let batches_count = batches.len();
         for batch in batches {
@@ -339,8 +339,8 @@ impl IggyProducer {
         trace!("No batch size specified, sending messages immediately.");
         self.encrypt_messages(&mut messages)?;
         let partitioning = self.get_partitioning(stream, topic, &messages, partitioning)?;
-        let batch_size = self.batch_size.unwrap_or(MAX_BATCH_SIZE);
-        if messages.len() <= batch_size {
+        let batch_length = self.batch_length.unwrap_or(MAX_BATCH_SIZE);
+        if messages.len() <= batch_length {
             self.last_sent_at
                 .store(IggyTimestamp::now().into(), ORDERING);
             self.try_send_messages(stream, topic, &partitioning, &mut messages)
@@ -348,7 +348,7 @@ impl IggyProducer {
             return Ok(());
         }
 
-        for batch in messages.chunks_mut(batch_size) {
+        for batch in messages.chunks_mut(batch_length) {
             self.last_sent_at
                 .store(IggyTimestamp::now().into(), ORDERING);
             self.try_send_messages(stream, topic, &partitioning, batch)

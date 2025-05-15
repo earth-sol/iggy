@@ -37,8 +37,8 @@ pub struct IggyProducerConfig {
     /// Set the topic replication factor
     topic_replication_factor: Option<u8>,
     /// The max number of messages to send in a batch. Must be greater than 0.
-    batch_size: u32,
-    /// Sets the interval between sending the messages, can be combined with `batch_size`.
+    batch_length: u32,
+    /// Sets the interval between sending the messages, can be combined with `batch_length`.
     send_interval: IggyDuration,
     /// Specifies to which partition the messages should be sent.
     partitioning: Partitioning,
@@ -61,7 +61,7 @@ impl Default for IggyProducerConfig {
             stream_name: "test_stream".to_string(),
             topic_id,
             topic_name: "test_topic".to_string(),
-            batch_size: 100,
+            batch_length: 100,
             send_interval: IggyDuration::from_str("5ms").unwrap(),
             partitioning: Partitioning::balanced(),
             topic_partitions_count: 1,
@@ -84,7 +84,7 @@ impl IggyProducerConfig {
     /// * `topic_name` - The topic name.
     /// * `topic_partitions_count` - The number of partitions to create.
     /// * `topic_replication_factor` - The replication factor to use.
-    /// * `batch_size` - The max number of messages to send in a batch.
+    /// * `batch_length` - The max number of messages to send in a batch.
     /// * `send_interval` - The interval between messages sent.
     /// * `partitioning` - The partitioning strategy to use.
     /// * `encryptor` - The encryptor to use.
@@ -102,7 +102,7 @@ impl IggyProducerConfig {
         topic_name: String,
         topic_partitions_count: u32,
         topic_replication_factor: Option<u8>,
-        batch_size: u32,
+        batch_length: u32,
         send_interval: IggyDuration,
         partitioning: Partitioning,
         encryptor: Option<Arc<EncryptorKind>>,
@@ -116,7 +116,7 @@ impl IggyProducerConfig {
             topic_name,
             topic_partitions_count,
             topic_replication_factor,
-            batch_size,
+            batch_length,
             send_interval,
             partitioning,
             encryptor,
@@ -132,7 +132,7 @@ impl IggyProducerConfig {
     ///
     /// * `stream` - The stream name.
     /// * `topic` - The topic name.
-    /// * `batch_size` - The max number of messages to send in a batch.
+    /// * `batch_length` - The max number of messages to send in a batch.
     /// * `send_interval` - The interval between messages sent.
     ///
     /// Returns:
@@ -141,7 +141,7 @@ impl IggyProducerConfig {
     pub fn from_stream_topic(
         stream: &str,
         topic: &str,
-        batch_size: u32,
+        batch_length: u32,
         send_interval: IggyDuration,
     ) -> Result<Self, IggyError> {
         let stream_id = Identifier::from_str_value(stream)?;
@@ -152,7 +152,7 @@ impl IggyProducerConfig {
             stream_name: stream.to_string(),
             topic_id,
             topic_name: topic.to_string(),
-            batch_size,
+            batch_length,
             send_interval,
             partitioning: Partitioning::balanced(),
             topic_partitions_count: 1,
@@ -181,8 +181,8 @@ impl IggyProducerConfig {
         &self.topic_name
     }
 
-    pub fn batch_size(&self) -> u32 {
-        self.batch_size
+    pub fn batch_length(&self) -> u32 {
+        self.batch_length
     }
 
     pub fn send_interval(&self) -> IggyDuration {
@@ -230,7 +230,7 @@ mod tests {
             .topic_id(Identifier::from_str_value(topic).unwrap())
             .topic_name(topic)
             .topic_partitions_count(3)
-            .batch_size(100)
+            .batch_length(100)
             .send_interval(IggyDuration::from_str("5ms").unwrap())
             .partitioning(Partitioning::balanced())
             .send_retries_count(3)
@@ -247,7 +247,7 @@ mod tests {
             &Identifier::from_str_value("test_topic").unwrap()
         );
         assert_eq!(config.topic_name(), "test_topic");
-        assert_eq!(config.batch_size(), 100);
+        assert_eq!(config.batch_length(), 100);
         assert_eq!(
             config.send_interval(),
             IggyDuration::from_str("5ms").unwrap()
@@ -272,7 +272,7 @@ mod tests {
         assert_eq!(config.stream_name(), "test_stream");
         assert_eq!(config.topic_id(), &topic_id);
         assert_eq!(config.topic_name(), "test_topic");
-        assert_eq!(config.batch_size(), 100);
+        assert_eq!(config.batch_length(), 100);
         assert_eq!(
             config.send_interval(),
             IggyDuration::from_str("5ms").unwrap()
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(config.stream_name(), "test_stream");
         assert_eq!(config.topic_id(), &topic_id);
         assert_eq!(config.topic_name(), "test_topic");
-        assert_eq!(config.batch_size(), 100);
+        assert_eq!(config.batch_length(), 100);
         assert_eq!(
             config.send_interval(),
             IggyDuration::from_str("5ms").unwrap()
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(config.stream_name(), "test_stream");
         assert_eq!(config.topic_id(), &topic_id);
         assert_eq!(config.topic_name(), "test_topic");
-        assert_eq!(config.batch_size(), 100);
+        assert_eq!(config.batch_length(), 100);
         assert_eq!(
             config.send_interval(),
             IggyDuration::from_str("5ms").unwrap()

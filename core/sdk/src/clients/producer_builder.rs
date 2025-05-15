@@ -31,7 +31,7 @@ pub struct IggyProducerBuilder {
     stream_name: String,
     topic: Identifier,
     topic_name: String,
-    batch_size: Option<usize>,
+    batch_length: Option<usize>,
     partitioning: Option<Partitioning>,
     encryptor: Option<Arc<EncryptorKind>>,
     partitioner: Option<Arc<dyn Partitioner>>,
@@ -63,7 +63,7 @@ impl IggyProducerBuilder {
             stream_name,
             topic,
             topic_name,
-            batch_size: Some(1000),
+            batch_length: Some(1000),
             partitioning: None,
             encryptor,
             partitioner,
@@ -90,26 +90,26 @@ impl IggyProducerBuilder {
     }
 
     /// Sets the number of messages to batch before sending them, can be combined with `interval`.
-    pub fn batch_size(self, batch_size: u32) -> Self {
+    pub fn batch_length(self, batch_length: u32) -> Self {
         Self {
-            batch_size: if batch_size == 0 {
+            batch_length: if batch_length == 0 {
                 None
             } else {
-                Some(batch_size.min(MAX_BATCH_SIZE as u32) as usize)
+                Some(batch_length.min(MAX_BATCH_SIZE as u32) as usize)
             },
             ..self
         }
     }
 
     /// Clears the batch size.
-    pub fn without_batch_size(self) -> Self {
+    pub fn without_batch_length(self) -> Self {
         Self {
-            batch_size: None,
+            batch_length: None,
             ..self
         }
     }
 
-    /// Sets the interval between sending the messages, can be combined with `batch_size`.
+    /// Sets the interval between sending the messages, can be combined with `batch_length`.
     pub fn send_interval(self, interval: IggyDuration) -> Self {
         Self {
             send_interval: Some(interval),
@@ -236,7 +236,7 @@ impl IggyProducerBuilder {
             self.stream_name,
             self.topic,
             self.topic_name,
-            self.batch_size,
+            self.batch_length,
             self.partitioning,
             self.encryptor,
             self.partitioner,

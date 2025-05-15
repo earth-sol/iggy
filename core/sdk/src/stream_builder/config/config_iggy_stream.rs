@@ -51,7 +51,7 @@ impl IggyStreamConfig {
     ///
     /// * `stream` - The stream name.
     /// * `topic` - The topic name.
-    /// * `batch_size` - The max number of messages to send in a batch.
+    /// * `batch_length` - The max number of messages to send in a batch.
     /// * `send_interval` - The interval between messages sent.
     /// * `polling_interval` - The interval between polling for new messages.
     ///
@@ -61,15 +61,15 @@ impl IggyStreamConfig {
     pub fn from_stream_topic(
         stream: &str,
         topic: &str,
-        batch_size: u32,
+        batch_length: u32,
         send_interval: IggyDuration,
         polling_interval: IggyDuration,
     ) -> Result<Self, IggyError> {
         let consumer_config =
-            IggyConsumerConfig::from_stream_topic(stream, topic, batch_size, polling_interval)?;
+            IggyConsumerConfig::from_stream_topic(stream, topic, batch_length, polling_interval)?;
 
         let producer_config =
-            IggyProducerConfig::from_stream_topic(stream, topic, batch_size, send_interval)?;
+            IggyProducerConfig::from_stream_topic(stream, topic, batch_length, send_interval)?;
 
         Ok(Self {
             consumer_config,
@@ -129,8 +129,8 @@ mod tests {
         let config = IggyStreamConfig::new(consumer_config, producer_config);
         assert_eq!(config.stream_name(), "test_stream");
         assert_eq!(config.topic_name(), "test_topic");
-        assert_eq!(config.consumer_config().batch_size(), 100);
-        assert_eq!(config.producer_config().batch_size(), 100);
+        assert_eq!(config.consumer_config().batch_length(), 100);
+        assert_eq!(config.producer_config().batch_length(), 100);
         assert_eq!(
             config.consumer_config().polling_interval(),
             IggyDuration::from_str("5ms").unwrap()
@@ -146,8 +146,8 @@ mod tests {
         let config = IggyStreamConfig::default();
         assert_eq!(config.stream_name(), "test_stream");
         assert_eq!(config.topic_name(), "test_topic");
-        assert_eq!(config.consumer_config().batch_size(), 100);
-        assert_eq!(config.producer_config().batch_size(), 100);
+        assert_eq!(config.consumer_config().batch_length(), 100);
+        assert_eq!(config.producer_config().batch_length(), 100);
         assert_eq!(
             config.consumer_config().polling_interval(),
             IggyDuration::from_str("5ms").unwrap()
@@ -173,8 +173,8 @@ mod tests {
 
         assert_eq!(config.stream_name(), "test_stream");
         assert_eq!(config.topic_name(), "test_topic");
-        assert_eq!(config.consumer_config().batch_size(), 100);
-        assert_eq!(config.producer_config().batch_size(), 100);
+        assert_eq!(config.consumer_config().batch_length(), 100);
+        assert_eq!(config.producer_config().batch_length(), 100);
         assert_eq!(
             config.consumer_config().polling_interval(),
             IggyDuration::from_str("5ms").unwrap()
