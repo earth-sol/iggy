@@ -15,6 +15,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
+
 pub mod builder;
 pub mod connector;
 pub mod frame;
@@ -27,7 +28,7 @@ use frame::ShardFrame;
 use namespace::IggyNamespace;
 use std::cell::{Cell, RefCell};
 
-use crate::configs::server::ServerConfig;
+use crate::{bootstrap::create_root_user, configs::server::ServerConfig};
 pub(crate) struct Shard {
     id: u16,
     connection: ShardConnector<ShardFrame>,
@@ -49,7 +50,7 @@ struct ShardInfo {
 pub struct IggyShard {
     pub id: u16,
     shards: Vec<Shard>,
-    //shards_table: RefCell<HashMap<IggyNamespace, ShardInfo>>,
+    shards_table: RefCell<HashMap<IggyNamespace, ShardInfo>>,
 
     //pub(crate) permissioner: RefCell<Permissioner>,
     //pub(crate) streams: RwLock<HashMap<u32, Stream>>,
@@ -84,11 +85,34 @@ impl IggyShard {
         Self {
             id,
             shards,
+            shards_table: Default::default(),
             config,
             stop_receiver,
             stop_sender,
             message_receiver: Cell::new(Some(shard_messages_receiver)),
         }
+    }
+
+    pub async fn init(&mut self) {
+        let user = create_root_user();
+        self.load_state().await;
+        self.load_users().await;
+        // Add default root user.
+        todo!();
+        self.load_streams().await;
+
+    }
+
+    async fn load_state(&self) {
+        todo!()
+    }
+
+    async fn load_users(&self) {
+        todo!()
+    }
+
+    async fn load_streams(&self) {
+        todo!()
     }
 
     pub fn assert_init(&self) {}

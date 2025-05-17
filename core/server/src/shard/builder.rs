@@ -43,7 +43,7 @@ impl IggyShardBuilder {
         self
     }
 
-    pub async fn build_and_init(self) -> IggyShard {
+    pub async fn build(self) -> IggyShard {
         let id = self.id.unwrap();
         let config = self.config.unwrap();
         let connections = self.connections.unwrap();
