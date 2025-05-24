@@ -20,6 +20,7 @@ mod test_basic;
 mod test_getting_started;
 mod test_message_envelope;
 mod test_message_headers;
+mod test_new_publisher;
 
 use assert_cmd::Command;
 use iggy::clients::client::IggyClient;

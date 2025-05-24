@@ -15,8 +15,9 @@
 // specific language governing permissions and limitations
 // under the License.
 
-use super::MAX_BATCH_SIZE;
-use crate::prelude::IggyProducer;
+use super::send_mode::{self, SendMode};
+use super::MAX_BATCH_LENGTH;
+use crate::prelude::{IggyProducer, ErrorCallback};
 use iggy_binary_protocol::Client;
 use iggy_common::locking::IggySharedMut;
 use iggy_common::{
@@ -36,6 +37,7 @@ pub struct IggyProducerBuilder {
     encryptor: Option<Arc<EncryptorKind>>,
     partitioner: Option<Arc<dyn Partitioner>>,
     linger_time: Option<IggyDuration>,
+    send_mode: SendMode,
     create_stream_if_not_exists: bool,
     create_topic_if_not_exists: bool,
     topic_partitions_count: u32,
@@ -44,6 +46,7 @@ pub struct IggyProducerBuilder {
     send_retries_interval: Option<IggyDuration>,
     topic_message_expiry: IggyExpiry,
     topic_max_size: MaxTopicSize,
+    error_callback: Option<Arc<dyn ErrorCallback>>
 }
 
 impl IggyProducerBuilder {
@@ -67,6 +70,7 @@ impl IggyProducerBuilder {
             partitioning: None,
             encryptor,
             partitioner,
+            send_mode: SendMode::default(),
             linger_time: Some(IggyDuration::from(1000)),
             create_stream_if_not_exists: true,
             create_topic_if_not_exists: true,
@@ -76,6 +80,7 @@ impl IggyProducerBuilder {
             topic_max_size: MaxTopicSize::ServerDefault,
             send_retries_count: Some(3),
             send_retries_interval: Some(IggyDuration::ONE_SECOND),
+            error_callback: None,
         }
     }
 
@@ -95,7 +100,7 @@ impl IggyProducerBuilder {
             batch_length: if batch_length == 0 {
                 None
             } else {
-                Some(batch_length.min(MAX_BATCH_SIZE as u32) as usize)
+                Some(batch_length.min(MAX_BATCH_LENGTH as u32) as usize)
             },
             ..self
         }
@@ -121,6 +126,20 @@ impl IggyProducerBuilder {
     pub fn without_linger_time(self) -> Self {
         Self {
             linger_time: None,
+            ..self
+        }
+    }
+
+    pub fn send_mode(self, send_mode: SendMode) -> Self {
+        Self {
+            send_mode,
+            ..self
+        }
+    }
+
+    pub fn error_callback(self, cb: Arc<dyn ErrorCallback>) -> Self {
+        Self {
+            error_callback: Some(cb),
             ..self
         }
     }
@@ -249,6 +268,8 @@ impl IggyProducerBuilder {
             self.topic_max_size,
             self.send_retries_count,
             self.send_retries_interval,
+            self.send_mode,
+            self.error_callback,
         )
     }
 }

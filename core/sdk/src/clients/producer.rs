@@ -1,3 +1,4 @@
+use super::send_mode::{BackpressureMode, SendMode};
 /* Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -15,7 +16,7 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-use super::{MAX_BATCH_SIZE, ORDERING};
+use super::{MAX_BATCH_LENGTH, ORDERING};
 
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -25,11 +26,18 @@ use iggy_common::{
     CompressionAlgorithm, DiagnosticEvent, EncryptorKind, IdKind, Identifier, IggyDuration,
     IggyError, IggyExpiry, IggyMessage, IggyTimestamp, MaxTopicSize, Partitioner, Partitioning,
 };
+use std::fmt::Debug;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use tokio::sync::Semaphore;
+use tokio::task::JoinHandle;
 use tokio::time::{Interval, sleep};
 use tracing::{error, info, trace, warn};
+
+pub trait ErrorCallback: Send + Sync + Debug {
+    fn call(&self, error: IggyError, messages: Vec<IggyMessage>);
+}
 
 unsafe impl Send for IggyProducer {}
 unsafe impl Sync for IggyProducer {}
@@ -44,6 +52,7 @@ pub struct IggyProducer {
     topic_name: String,
     batch_length: Option<usize>,
     partitioning: Option<Arc<Partitioning>>,
+    send_mode: Arc<SendMode>,
     encryptor: Option<Arc<EncryptorKind>>,
     partitioner: Option<Arc<dyn Partitioner>>,
     linger_time_micros: u64,
@@ -58,6 +67,11 @@ pub struct IggyProducer {
     last_sent_at: Arc<AtomicU64>,
     send_retries_count: Option<u32>,
     send_retries_interval: Option<IggyDuration>,
+
+    _join_handle: Option<JoinHandle<()>>,
+    sema: Arc<Semaphore>,
+    sender: Option<Arc<flume::Sender<Vec<IggyMessage>>>>,
+    error_callback: Option<Arc<dyn ErrorCallback>>,
 }
 
 impl IggyProducer {
@@ -72,7 +86,7 @@ impl IggyProducer {
         partitioning: Option<Partitioning>,
         encryptor: Option<Arc<EncryptorKind>>,
         partitioner: Option<Arc<dyn Partitioner>>,
-        interval: Option<IggyDuration>,
+        linger_time: Option<IggyDuration>,
         create_stream_if_not_exists: bool,
         create_topic_if_not_exists: bool,
         topic_partitions_count: u32,
@@ -81,6 +95,8 @@ impl IggyProducer {
         topic_max_size: MaxTopicSize,
         send_retries_count: Option<u32>,
         send_retries_interval: Option<IggyDuration>,
+        send_mode: SendMode,
+        error_callback: Option<Arc<dyn ErrorCallback>>,
     ) -> Self {
         Self {
             initialized: false,
@@ -92,9 +108,10 @@ impl IggyProducer {
             topic_name,
             batch_length,
             partitioning: partitioning.map(Arc::new),
+            send_mode: Arc::new(send_mode),
             encryptor,
             partitioner,
-            linger_time_micros: interval.map_or(0, |i| i.as_micros()),
+            linger_time_micros: linger_time.map_or(0, |i| i.as_micros()),
             create_stream_if_not_exists,
             create_topic_if_not_exists,
             topic_partitions_count,
@@ -102,10 +119,14 @@ impl IggyProducer {
             topic_message_expiry,
             topic_max_size,
             default_partitioning: Arc::new(Partitioning::balanced()),
-            can_send_immediately: interval.is_none(),
+            can_send_immediately: linger_time.is_none(),
             last_sent_at: Arc::new(AtomicU64::new(0)),
             send_retries_count,
             send_retries_interval,
+            _join_handle: None,
+            sema: Arc::new(Semaphore::new(10)),
+            sender: None,
+            error_callback,
         }
     }
 
@@ -179,8 +200,84 @@ impl IggyProducer {
                 .await?;
         }
 
+        let (tx, rx) = flume::bounded::<Vec<IggyMessage>>(0); // todo задать какое-то значение
+        let stream_id = self.stream_id.clone();
+        let topic_id = self.topic_id.clone();
+        let partitioning = self.partitioning.clone();
+        let default_partitioning = self.default_partitioning.clone();
+        let partitioner = self.partitioner.clone();
+        let client = self.client.clone();
+        let send_retries_count = self.send_retries_count.clone();
+        let send_retries_interval = self.send_retries_interval.clone();
+        let can_send = self.can_send.clone();
+        let sema = self.sema.clone();
+
+        let handle = tokio::spawn(async move {
+            while let Ok(mut batch) = rx.recv_async().await {
+                // let sema = sema.clone();
+                // let partitioner = partitioner.clone();
+                // let stream_id = stream_id.clone();
+                // let topic_id = topic_id.clone();
+                // let partitioning = partitioning.clone();
+                // let default_partitioning = default_partitioning.clone();
+                // let client = client.clone();
+                // let can_send = can_send.clone();
+
+                let partitioning = get_partitioning(
+                    &partitioner,
+                    &stream_id,
+                    &topic_id,
+                    &batch,
+                    partitioning.clone(),
+                    &partitioning,
+                    default_partitioning.clone(),
+                )
+                .unwrap();
+                try_send_messages(
+                    client.clone(),
+                    send_retries_count,
+                    send_retries_interval,
+                    can_send.clone(),
+                    &stream_id,
+                    &topic_id,
+                    &partitioning,
+                    &mut batch,
+                )
+                .await
+                .unwrap();
+                // tokio::spawn(async move {
+                //     let _permit = sema.acquire().await.unwrap();
+                //     let partitioning = get_partitioning(
+                //         &partitioner,
+                //         &stream_id,
+                //         &topic_id,
+                //         &batch,
+                //         partitioning.clone(),
+                //         &partitioning,
+                //         default_partitioning.clone(),
+                //     )
+                //     .unwrap();
+                //     try_send_messages(
+                //         client.clone(),
+                //         send_retries_count,
+                //         send_retries_interval,
+                //         can_send.clone(),
+                //         &stream_id,
+                //         &topic_id,
+                //         &partitioning,
+                //         &mut batch,
+                //     ).await.unwrap();
+                // });
+            }
+        });
+        self._join_handle = Some(handle);
+        self.sender = Some(Arc::new(tx));
         self.initialized = true;
-        info!("Producer has been initialized for stream: {stream_id} and topic: {topic_id}.");
+        info!(
+            "Producer has been initialized for stream: {} and topic: {}.",
+            self.stream_id.clone(),
+            self.topic_id.clone()
+        );
         Ok(())
     }
 
@@ -242,6 +339,12 @@ impl IggyProducer {
         .await
     }
 
+    // todod добавить канал для считывания
+    pub async fn send_async(&self, messages: Vec<IggyMessage>) {
+        let sender = self.sender.clone();
+        sender.unwrap().send_async(messages).await.unwrap();
+    }
+
     pub async fn send_one(&self, message: IggyMessage) -> Result<(), IggyError> {
         self.send(vec![message]).await
     }
@@ -293,6 +396,7 @@ impl IggyProducer {
             .await
     }
 
+    // TODO add batch_size
     async fn send_buffered(
         &self,
         stream: Arc<Identifier>,
@@ -301,8 +405,18 @@ impl IggyProducer {
         partitioning: Option<Arc<Partitioning>>,
     ) -> Result<(), IggyError> {
         self.encrypt_messages(&mut messages)?;
-        let partitioning = self.get_partitioning(&stream, &topic, &messages, partitioning)?;
-        let batch_length = self.batch_length.unwrap_or(MAX_BATCH_SIZE);
+        let default_partitioning = self.default_partitioning.clone();
+        let partitioner = self.partitioner.clone();
+        let partitioning = get_partitioning(
+            &partitioner,
+            &stream,
+            &topic,
+            &messages,
+            partitioning,
+            &self.partitioning,
+            default_partitioning,
+        )?;
+        let batch_length = self.batch_length.unwrap_or(MAX_BATCH_LENGTH);
         let batches = messages.chunks_mut(batch_length);
         let mut current_batch = 1;
         let batches_count = batches.len();
@@ -321,8 +435,30 @@ impl IggyProducer {
             );
             self.last_sent_at
                 .store(IggyTimestamp::now().into(), ORDERING);
-            self.try_send_messages(&self.stream_id, &self.topic_id, &partitioning, batch)
-                .await?;
+
+            let client = self.client.clone();
+            let send_retries_count = self.send_retries_count.clone();
+            let send_retries_interval = self.send_retries_interval.clone();
+            let can_send = self.can_send.clone();
+
+            let sender = self.sender.clone();
+            let send_mode = self.send_mode.clone();
+            try_send_messages_new(
+                BackpressureMode::Block,
+                sender,
+                self.error_callback.clone(),
+                send_mode,
+                client,
+                send_retries_count,
+                send_retries_interval,
+                can_send,
+                &self.stream_id,
+                &self.topic_id,
+                &partitioning,
+                batch,
+            )
+            .await?;
+
             trace!("Sent {messages_count} messages ({current_batch}/{batches_count} batch(es)).");
             current_batch += 1;
         }
@@ -338,21 +474,56 @@ impl IggyProducer {
     ) -> Result<(), IggyError> {
         trace!("No batch size specified, sending messages immediately.");
         self.encrypt_messages(&mut messages)?;
-        let partitioning = self.get_partitioning(stream, topic, &messages, partitioning)?;
-        let batch_length = self.batch_length.unwrap_or(MAX_BATCH_SIZE);
+        let default_partitioning = self.default_partitioning.clone();
+        let partitioner = self.partitioner.clone();
+        let client = self.client.clone();
+        let send_retries_count = self.send_retries_count.clone();
+        let send_retries_interval = self.send_retries_interval.clone();
+        let can_send = self.can_send.clone();
+
+        let partitioning = get_partitioning(
+            &partitioner,
+            &stream,
+            &topic,
+            &messages,
+            partitioning,
+            &self.partitioning,
+            default_partitioning,
+        )?;
+        let batch_length = self.batch_length.unwrap_or(MAX_BATCH_LENGTH);
         if messages.len() <= batch_length {
             self.last_sent_at
                 .store(IggyTimestamp::now().into(), ORDERING);
-            self.try_send_messages(stream, topic, &partitioning, &mut messages)
-                .await?;
+            try_send_messages(
+                client.clone(),
+                send_retries_count,
+                send_retries_interval,
+                can_send,
+                stream,
+                topic,
+                &partitioning,
+                &mut messages,
+            )
+            .await?;
             return Ok(());
         }
 
         for batch in messages.chunks_mut(batch_length) {
+            let client = client.clone();
+            let can_send = can_send.clone();
             self.last_sent_at
                 .store(IggyTimestamp::now().into(), ORDERING);
-            self.try_send_messages(stream, topic, &partitioning, batch)
-                .await?;
+            try_send_messages(
+                client,
+                send_retries_count,
+                send_retries_interval,
+                can_send,
+                stream,
+                topic,
+                &partitioning,
+                batch,
+            )
+            .await?;
         }
         Ok(())
     }
@@ -385,144 +556,236 @@ impl IggyProducer {
         }
         Ok(())
     }
+}
 
-    async fn try_send_messages(
-        &self,
-        stream: &Identifier,
-        topic: &Identifier,
-        partitioning: &Arc<Partitioning>,
-        messages: &mut [IggyMessage],
-    ) -> Result<(), IggyError> {
-        let client = self.client.read().await;
-        let Some(max_retries) = self.send_retries_count else {
-            return client
-                .send_messages(stream, topic, partitioning, messages)
-                .await;
-        };
-
-        if max_retries == 0 {
-            return client
-                .send_messages(stream, topic, partitioning, messages)
-                .await;
-        }
-
-        let mut timer = if let Some(interval) = self.send_retries_interval {
-            let mut timer = tokio::time::interval(interval.get_duration());
-            timer.tick().await;
-            Some(timer)
-        } else {
-            None
-        };
-
-        self.wait_until_connected(max_retries, stream, topic, &mut timer)
-            .await?;
-        self.send_with_retries(
-            max_retries,
-            stream,
-            topic,
-            partitioning,
-            messages,
-            &mut timer,
-        )
-        .await
+fn get_partitioning(
+    partitioner: &Option<Arc<dyn Partitioner>>,
+    stream: &Identifier,
+    topic: &Identifier,
+    messages: &[IggyMessage],
+    partitioning: Option<Arc<Partitioning>>,
+    producer_partitioning: &Option<Arc<Partitioning>>,
+    default_partitioning: Arc<Partitioning>,
+) -> Result<Arc<Partitioning>, IggyError> {
+    if let Some(partitioner) = partitioner {
+        trace!("Calculating partition id using custom partitioner.");
+        let partition_id = partitioner.calculate_partition_id(stream, topic, messages)?;
+        Ok(Arc::new(Partitioning::partition_id(partition_id)))
+    } else {
+        trace!("Using the provided partitioning.");
+        Ok(partitioning.unwrap_or_else(|| {
+            producer_partitioning
+                .clone()
+                .unwrap_or_else(|| default_partitioning.clone())
+        }))
     }
+}
 
-    async fn wait_until_connected(
-        &self,
-        max_retries: u32,
-        stream: &Identifier,
-        topic: &Identifier,
-        timer: &mut Option<Interval>,
-    ) -> Result<(), IggyError> {
-        let mut retries = 0;
-        while !self.can_send.load(ORDERING) {
-            retries += 1;
-            if retries > max_retries {
-                error!(
-                    "Failed to send messages to topic: {topic}, stream: {stream} \
-                     after {max_retries} retries. Client is disconnected."
-                );
-                return Err(IggyError::CannotSendMessagesDueToClientDisconnection);
-            }
-
+async fn wait_until_connected(
+    can_send: Arc<AtomicBool>,
+    max_retries: u32,
+    stream: &Identifier,
+    topic: &Identifier,
+    timer: &mut Option<Interval>,
+) -> Result<(), IggyError> {
+    let mut retries = 0;
+    while !can_send.load(ORDERING) {
+        retries += 1;
+        if retries > max_retries {
             error!(
-                "Trying to send messages to topic: {topic}, stream: {stream} \
-                 but the client is disconnected. Retrying {retries}/{max_retries}..."
+                "Failed to send messages to topic: {topic}, stream: {stream} \
+                 after {max_retries} retries. Client is disconnected."
             );
-
-            if let Some(timer) = timer.as_mut() {
-                trace!(
-                    "Waiting for the next retry to send messages to topic: {topic}, \
-                     stream: {stream} for disconnected client..."
-                );
-                timer.tick().await;
-            }
+            return Err(IggyError::CannotSendMessagesDueToClientDisconnection);
         }
-        Ok(())
+
+        error!(
+            "Trying to send messages to topic: {topic}, stream: {stream} \
+             but the client is disconnected. Retrying {retries}/{max_retries}..."
+        );
+
+        if let Some(timer) = timer.as_mut() {
+            trace!(
+                "Waiting for the next retry to send messages to topic: {topic}, \
+                 stream: {stream} for disconnected client..."
+            );
+            timer.tick().await;
+        }
     }
+    Ok(())
+}
 
-    async fn send_with_retries(
-        &self,
-        max_retries: u32,
-        stream: &Identifier,
-        topic: &Identifier,
-        partitioning: &Arc<Partitioning>,
-        messages: &mut [IggyMessage],
-        timer: &mut Option<Interval>,
-    ) -> Result<(), IggyError> {
-        let client = self.client.read().await;
-        let mut retries = 0;
-        loop {
-            match client
-                .send_messages(stream, topic, partitioning, messages)
-                .await
-            {
-                Ok(_) => return Ok(()),
-                Err(error) => {
-                    retries += 1;
-                    if retries > max_retries {
-                        error!(
-                            "Failed to send messages to topic: {topic}, stream: {stream} \
-                             after {max_retries} retries. {error}."
-                        );
-                        return Err(error);
-                    }
-
+async fn send_with_retries(
+    client: Arc<IggySharedMut<Box<dyn Client>>>,
+    max_retries: u32,
+    stream: &Identifier,
+    topic: &Identifier,
+    partitioning: &Arc<Partitioning>,
+    messages: &mut [IggyMessage],
+    timer: &mut Option<Interval>,
+) -> Result<(), IggyError> {
+    let client = client.read().await;
+    let mut retries = 0;
+    loop {
+        match client
+            .send_messages(stream, topic, partitioning, messages)
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(error) => {
+                retries += 1;
+                if retries > max_retries {
                     error!(
-                        "Failed to send messages to topic: {topic}, stream: {stream}. \
-                         {error} Retrying {retries}/{max_retries}..."
+                        "Failed to send messages to topic: {topic}, stream: {stream} \
+                         after {max_retries} retries. {error}."
                     );
+                    return Err(error);
+                }
 
-                    if let Some(t) = timer.as_mut() {
-                        trace!(
-                            "Waiting for the next retry to send messages to topic: {topic}, \
-                             stream: {stream}..."
-                        );
-                        t.tick().await;
-                    }
+                error!(
+                    "Failed to send messages to topic: {topic}, stream: {stream}. \
+                     {error} Retrying {retries}/{max_retries}..."
+                );
+
+                if let Some(t) = timer.as_mut() {
+                    trace!(
+                        "Waiting for the next retry to send messages to topic: {topic}, \
+                         stream: {stream}..."
+                    );
+                    t.tick().await;
                 }
             }
         }
     }
+}
 
-    fn get_partitioning(
-        &self,
-        stream: &Identifier,
-        topic: &Identifier,
-        messages: &[IggyMessage],
-        partitioning: Option<Arc<Partitioning>>,
-    ) -> Result<Arc<Partitioning>, IggyError> {
-        if let Some(partitioner) = &self.partitioner {
-            trace!("Calculating partition id using custom partitioner.");
-            let partition_id = partitioner.calculate_partition_id(stream, topic, messages)?;
-            Ok(Arc::new(Partitioning::partition_id(partition_id)))
-        } else {
-            trace!("Using the provided partitioning.");
-            Ok(partitioning.unwrap_or_else(|| {
-                self.partitioning
-                    .clone()
-                    .unwrap_or_else(|| self.default_partitioning.clone())
-            }))
+async fn try_send_messages(
+    client: Arc<IggySharedMut<Box<dyn Client>>>,
+    send_retries_count: Option<u32>,
+    send_retries_interval: Option<IggyDuration>,
+    can_send: Arc<AtomicBool>,
+    stream: &Identifier,
+    topic: &Identifier,
+    partitioning: &Arc<Partitioning>,
+    messages: &mut [IggyMessage],
+) -> Result<(), IggyError> {
+    let rw_client = client.read().await;
+    let Some(max_retries) = send_retries_count else {
+        return rw_client
+            .send_messages(stream, topic, partitioning, messages)
+            .await;
+    };
+
+    if max_retries == 0 {
+        return rw_client
+            .send_messages(stream, topic, partitioning, messages)
+            .await;
+    }
+
+    let mut timer = if let Some(interval) = send_retries_interval {
+        let mut timer = tokio::time::interval(interval.get_duration());
+        timer.tick().await;
+        Some(timer)
+    } else {
+        None
+    };
+
+    wait_until_connected(can_send.clone(), max_retries, stream, topic, &mut timer).await?;
+    send_with_retries(
+        client.clone(),
+        max_retries,
+        stream,
+        topic,
+        partitioning,
+        messages,
+        &mut timer,
+    )
+    .await
+}
+
+async fn try_send_messages_new(
+    backpressure_mode: BackpressureMode,
+    sender: Option<Arc<flume::Sender<Vec<IggyMessage>>>>,
+    error_callback: Option<Arc<dyn ErrorCallback>>,
+    send_mode: Arc<SendMode>,
+    client: Arc<IggySharedMut<Box<dyn Client>>>,
+    send_retries_count: Option<u32>,
+    send_retries_interval: Option<IggyDuration>,
+    can_send: Arc<AtomicBool>,
+    stream: &Identifier,
+    topic: &Identifier,
+    partitioning: &Arc<Partitioning>,
+    messages: &mut [IggyMessage],
+) -> Result<(), IggyError> {
+    match &*send_mode {
+        SendMode::Sync => {
+            try_send_messages(
+                client,
+                send_retries_count,
+                send_retries_interval,
+                can_send,
+                stream,
+                topic,
+                partitioning,
+                messages,
+            )
+            .await
+        }
+
+        SendMode::Background(_cfg) => {
+            let out: Vec<IggyMessage> = messages.iter_mut().map(std::mem::take).collect();
+            let sender = sender.as_ref().expect("init() must set sender").clone();
+
+            match sender.try_send(out) {
+                Ok(()) => Ok(()),
+
+                Err(flume::TrySendError::Full(out)) => match backpressure_mode {
+                    BackpressureMode::Block => match sender.send_async(out).await {
+                        Ok(()) => Ok(()),
+                        Err(flume::SendError(out)) => {
+                            if let Some(cb) = error_callback {
+                                cb.call(IggyError::BackgroundSendError, out);
+                            }
+                            Err(IggyError::BackgroundSendError)
+                        }
+                    },
+
+                    BackpressureMode::BlockWithTimeout(t) => {
+                        match tokio::time::timeout(t.get_duration(), sender.send_async(out)).await {
+                            Ok(Ok(())) => Ok(()),
+
+                            Ok(Err(flume::SendError(out))) => {
+                                if let Some(cb) = error_callback {
+                                    cb.call(IggyError::BackgroundSendTimeout, out);
+                                }
+                                Err(IggyError::BackgroundSendTimeout)
+                            }
+
+                            Err(_) => {
+                                if let Some(cb) = &error_callback {
+                                    cb.call(IggyError::BackgroundSendTimeout, vec![]);
+                                }
+                                Err(IggyError::BackgroundSendTimeout)
+                            }
+                        }
+                    }
+
+                    BackpressureMode::FailImmediately => {
+                        if let Some(cb) = &error_callback {
+                            cb.call(IggyError::BackgroundSendBufferFull, out);
+                        }
+                        Err(IggyError::BackgroundSendBufferFull)
+                    }
+                },
+
+                Err(flume::TrySendError::Disconnected(out)) => {
+                    if let Some(cb) = &error_callback {
+                        cb.call(IggyError::BackgroundWorkerDisconnected, out);
+                    }
+                    error!("Background worker has shut down.");
+                    Err(IggyError::BackgroundWorkerDisconnected)
+                }
+            }
         }
     }
 }

@@ -155,6 +155,7 @@ impl IggyClient {
             topic.to_owned(),
             self.encryptor.clone(),
             None,
+            
         ))
     }
 }

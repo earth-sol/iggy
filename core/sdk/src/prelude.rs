@@ -35,7 +35,7 @@ pub use crate::clients::consumer::{
     AutoCommit, AutoCommitAfter, AutoCommitWhen, IggyConsumer, ReceivedMessage,
 };
 pub use crate::clients::consumer_builder::IggyConsumerBuilder;
-pub use crate::clients::producer::IggyProducer;
+pub use crate::clients::producer::{IggyProducer, ErrorCallback};
 pub use crate::clients::producer_builder::IggyProducerBuilder;
 pub use crate::consumer_ext::IggyConsumerMessageExt;
 pub use crate::stream_builder::IggyConsumerConfig;
