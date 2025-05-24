@@ -34,6 +34,25 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio::time::{Interval, sleep};
 use tracing::{error, info, trace, warn};
+use dashmap::DashMap;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+
+struct shard {
+    tx: flume::Sender<Vec<IggyMessage>>,
+    _join_handle: JoinHandle<()>,
+}
+
+impl shard {
+    fn new(id: usize) -> Self {
+        let (tx, rx) = flume::bounded::<Vec<IggyMessage>>(10); // todo добавить размер в конфигурацию
+        let handle = tokio::spawn(async move {
+            while let Ok(message) = rx.recv_async().await { // todo поменять на match
+                
+            }
+        });
+    }
+}
 
 pub trait ErrorCallback: Send + Sync + Debug {
     fn call(&self, error: IggyError, messages: Vec<IggyMessage>);
@@ -72,6 +91,8 @@ pub struct IggyProducer {
     sema: Arc<Semaphore>,
     sender: Option<Arc<flume::Sender<Vec<IggyMessage>>>>,
     error_callback: Option<Arc<dyn ErrorCallback>>,
+    shard_number: usize,
+    // todo добавить ShardStrategy
 }
 
 impl IggyProducer {
@@ -127,6 +148,7 @@ impl IggyProducer {
             sema: Arc::new(Semaphore::new(10)),
             sender: None,
             error_callback,
+            shard_number: default_shard_count(),
         }
     }
 
@@ -210,7 +232,9 @@ impl IggyProducer {
         let send_retries_count = self.send_retries_count.clone();
         let send_retries_interval = self.send_retries_interval.clone();
         let can_send = self.can_send.clone();
-        let sema = self.sema.clone();
+        let send_batches = AtomicUsize::new(0);
+        let num_shard = self.shard_number;
+        // let sema = self.sema.clone();
 
         let handle = tokio::spawn(async move {
             while let Ok(mut batch) = rx.recv_async().await {
@@ -222,6 +246,10 @@ impl IggyProducer {
                 // let default_partitioning = default_partitioning.clone();
                 // let client = client.clone();
                 // let can_send = can_send.clone();
+
+                // if round_robin
+                let shard_ix = send_batches.fetch_add(1, Ordering::SeqCst) % num_shard;
+
 
                 let partitioning = get_partitioning(
                     &partitioner,
@@ -788,4 +816,17 @@ async fn try_send_messages_new(
             }
         }
     }
+}
+
+fn default_shard_count() -> usize {
+    let cpus = num_cpus::get();
+    cpus.clamp(2, 16)
+}
+
+fn default_sharder(msg: &IggyMessage) -> &[u8] {
+    if let Some(h) = &msg.user_headers {
+        return &h[..h.len().min(16)];
+    }
+
+    &msg.payload[..msg.payload.len().min(16)]
 }
