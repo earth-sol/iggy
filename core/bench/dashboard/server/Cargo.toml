@@ -6,7 +6,7 @@ edition = "2024"
 
 [dependencies]
 actix-cors = "0.7.1"
-actix-files = "0.6.6"
+actix-files = "0.6.10"
 actix-web = "4.10.2"
 bench-dashboard-shared = { path = "../shared" }
 bench-report = { workspace = true }
