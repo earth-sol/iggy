@@ -39,7 +39,7 @@
     "@types/node": "^22.9.3",
     "eslint": "^9.39.1",
     "jiti": "^2.6.1",
-    "tsx": "^4.7.0",
+    "tsx": "^4.22.4",
     "typescript-eslint": "^8.47.0"
   },
   "eslintConfig": {
