@@ -1,6 +1,6 @@
 module github.com/apache/iggy/bdd/go
 
-go 1.23.0
+go 1.25.0
 
 replace github.com/apache/iggy/foreign/go => ../../foreign/go
 
@@ -26,9 +26,9 @@ require (
 	github.com/klauspost/compress v1.17.11 // indirect
 	github.com/spf13/pflag v1.0.7 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
-	golang.org/x/net v0.38.0 // indirect
-	golang.org/x/sys v0.32.0 // indirect
-	golang.org/x/text v0.23.0 // indirect
-	golang.org/x/tools v0.31.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/tools v0.44.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
