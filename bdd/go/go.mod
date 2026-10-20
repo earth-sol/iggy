@@ -1,6 +1,6 @@
 module github.com/apache/iggy/bdd/go
 
-go 1.23.0
+go 1.24
 
 replace github.com/apache/iggy/foreign/go => ../../foreign/go
 
@@ -23,7 +23,7 @@ require (
 	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
 	github.com/hashicorp/go-memdb v1.3.5 // indirect
 	github.com/hashicorp/golang-lru v1.0.2 // indirect
-	github.com/klauspost/compress v1.17.11 // indirect
+	github.com/klauspost/compress v1.18.7 // indirect
 	github.com/spf13/pflag v1.0.7 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
 	golang.org/x/net v0.38.0 // indirect
